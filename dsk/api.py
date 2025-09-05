@@ -44,15 +44,6 @@ class DeepSeekAPI:
         if not auth_token or not isinstance(auth_token, str):
             raise AuthenticationError("Invalid auth token provided")
 
-        try:
-            curl_cffi_version = pkg_resources.get_distribution('curl-cffi').version
-            if curl_cffi_version != '0.8.1b9':
-                print("\033[93mWarning: DeepSeek API requires curl-cffi version 0.8.1b9", file=sys.stderr)
-                print("Please install the correct version using: pip install curl-cffi==0.8.1b9\033[0m", file=sys.stderr)
-        except pkg_resources.DistributionNotFound:
-            print("\033[93mWarning: curl-cffi not found. Please install version 0.8.1b9:", file=sys.stderr)
-            print("pip install curl-cffi==0.8.1b9\033[0m", file=sys.stderr)
-
         self.auth_token = auth_token
         self.pow_solver = DeepSeekPOW()
 
@@ -198,7 +189,7 @@ class DeepSeekAPI:
             search_enabled (bool): Whether to enable web search for up-to-date information
 
         Returns:
-            Generator[Dict[str, Any], None, None]: Yields message chunks with content and type
+            Generator[Dict[str], None, None]: Yields message chunks with content and type
 
         Raises:
             AuthenticationError: If the authentication token is invalid
@@ -235,7 +226,7 @@ class DeepSeekAPI:
                 impersonate='chrome120',
                 stream=True,
                 timeout=None
-            )
+            )        
 
             if response.status_code != 200:
                 error_text = next(response.iter_lines(), b'').decode('utf-8', 'ignore')
@@ -251,33 +242,25 @@ class DeepSeekAPI:
                     parsed = self._parse_chunk(chunk)
                     if parsed:
                         yield parsed
-                        if parsed.get('finish_reason') == 'stop':
-                            break
                 except Exception as e:
                     raise APIError(f"Error parsing response chunk: {str(e)}")
 
         except requests.exceptions.RequestException as e:
             raise NetworkError(f"Network error occurred during streaming: {str(e)}")
 
-    def _parse_chunk(self, chunk: bytes) -> Optional[Dict[str, Any]]:
+    def _parse_chunk(self, chunk: bytes) -> Optional[Dict[str, str]]:
         """Parse a SSE chunk from the API response"""
         if not chunk:
             return None
-
         try:
             if chunk.startswith(b'data: '):
                 data = json.loads(chunk[6:])
-
-                if 'choices' in data and data['choices']:
-                    choice = data['choices'][0]
-                    if 'delta' in choice:
-                        delta = choice['delta']
-
-                        return {
-                            'content': delta.get('content', ''),
-                            'type': delta.get('type', ''),
-                            'finish_reason': choice.get('finish_reason')
-                        }
+                if 'v' in data and isinstance(data['v'], str):
+                    choice = data['v']
+                    return {
+                           'content': choice,
+                           'type': 'text',
+                       }
         except json.JSONDecodeError:
             raise APIError("Invalid JSON in response chunk")
         except Exception as e:
